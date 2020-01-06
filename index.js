@@ -7,21 +7,27 @@ rooms = [];
 roomsRandoms = [];
 const maxClient = 2;
 
-
-app.get('/', function(req, res){
-  res.send('<h1>Hello world</h1>');
-});
-
 io.on('connection', function(socket){
     console.log('a user connected, 서버에 접속');
 
     //방 만들기
-    var addRoom = function(socket) {
+    var addRoom = function() {
         var roomId = uuidv4();
-        socket.join(roomId, function() {
-            var room = {roomId: roomId, clients: [{clients: socket.io, ready: false}]};
+            socket.join(roomId, function() {
+            var room = {roomId, clients: [{clientId: socket.id, ready: false}]};
             rooms.push(room);
-            socket.emit('addRoom', {roomId: roomId});
+            socket.emit('join', {roomId: roomId});
+        });
+    }
+
+
+    var createRoom = function() {
+        var roomId = uuidv4();          //방 이름 생성
+        socket.join(roomId, function() {
+            var room = {roomId, clients: [{ clientId: socket.id, ready: false }] };
+            rooms.push(room);
+
+            socket.emit('join', {roomId: roomId, clientId: socket.id});
         });
     }
     //유효한 방 배열로 찾기
@@ -36,6 +42,10 @@ io.on('connection', function(socket){
                 }
             }
             return roomsRandoms;
+        }
+        else
+        {
+            return -1;
         }
     }
     //찾은 방 배열에 넣기
@@ -53,7 +63,68 @@ io.on('connection', function(socket){
 
         var client = {clientId:socket.id, ready:false}
         rooms[roomsRandoms[randomIndex]].clients.push(client);
+
+        socket.emit('join', {roomId: rooms[roomsRandoms[randomIndex]].roomId, clientId: socket.id});
     }
+    else
+    {
+        createRoom();
+    }
+
+    socket.on('ready', function(data) {
+        if (!data) return;
+
+        var room = rooms.find(room => room.roomId === data.roomId);
+
+        if (room)
+        {
+            var clients = room.clients;
+            var client = clients.find(client => client.clientId === data.clientId);
+            if (client) client.ready = true;
+            
+            //방 안에 모두가 true이면 게임시작
+            if (clients.length == 2)
+            {
+                if (clients[0].ready && clients[1].ready)
+                {
+                    io.to(clients[0].clientId).emit('play', {first: true});
+                    io.to(clients[1].clientId).emit('play', {first: false});
+                }
+            }
+        }
+    });
+    //상대턴
+    socket.on('select', function(data) {
+        if (!data) return;
+
+        var index = data.index;
+        var roomId = data.roomId;
+        if (index > -1 && roomId)
+        {
+            socket.to(roomId).emit('selected', {index: index});
+        }
+    });
+    //클라이언트가 승리했을때
+    socket.on('win', function(data) {
+        if (!data) return;
+        var roomId = data.roomId;
+        var index = data.index;
+        if (index > -1 && roomId)
+        {
+            socket.to(roomId).emit('lose', {index: index});
+        }
+    });
+
+    //클라이언트가 무승부했을때
+    socket.on('tie', function(data) {
+        if (!data) return;
+        var roomId = data.roomId;
+        var index = data.index;
+        if (index > -1 && roomId)
+        {
+            socket.to(roomId).emit('tie', {index: index});
+        }
+    });
 
 
     socket.on('disconnect', function(){
